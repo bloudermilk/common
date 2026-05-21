@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { useUser } from "@/utils/UserProvider";
-import { trpc } from "@op/api/client";
-import { Checkbox } from "@op/ui/Checkbox";
-import { EmptyState } from "@op/ui/EmptyState";
-import { Header3 } from "@op/ui/Header";
-import { LuLeaf } from "react-icons/lu";
+import { useUser } from '@/utils/UserProvider';
+import { trpc } from '@op/api/client';
+import { Checkbox } from '@op/ui/Checkbox';
+import { EmptyState } from '@op/ui/EmptyState';
+import { Header3 } from '@op/ui/Header';
+import { LuLeaf } from 'react-icons/lu';
 
-import { useTranslations } from "@/lib/i18n";
+import { useTranslations } from '@/lib/i18n';
 
 import {
   ProposalCardContent,
@@ -15,15 +15,15 @@ import {
   ProposalCardHeader,
   ProposalCardMeta,
   ProposalCardPreview,
-} from "./ProposalCard";
-import { VotingProposalCard } from "./VotingProposalCard";
+} from './ProposalCard';
+import { VotingProposalCard } from './VotingProposalCard';
 
 export const NoVoteFound = () => {
   const t = useTranslations();
   return (
     <EmptyState icon={<LuLeaf className="size-6" />}>
       <Header3 className="font-serif !text-title-base font-light text-neutral-black">
-        {t("You did not vote in this process.")}
+        {t('You did not vote in this process.')}
       </Header3>
     </EmptyState>
   );
@@ -85,7 +85,7 @@ const MyBallotProposals = ({
   return (
     <div className="flex flex-col gap-4 pb-12">
       <Header3 className="font-serif !text-title-base">
-        {t("My Ballot")}
+        {t('My Ballot')}
       </Header3>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -108,7 +108,7 @@ const MyBallotProposals = ({
                       isSelected={true}
                       shape="circle"
                       borderColor="light"
-                      aria-label={t("Selected proposal")}
+                      aria-label={t('Selected proposal')}
                       isDisabled={true}
                     />
                   }
@@ -123,7 +123,7 @@ const MyBallotProposals = ({
                 <ProposalCardFooter>
                   <div className="flex items-start gap-1 text-base text-neutral-charcoal">
                     <span className="font-bold">{proposal.voteCount ?? 0}</span>
-                    <span>{t("Total Votes")}</span>
+                    <span>{t('Total Votes')}</span>
                   </div>
                 </ProposalCardFooter>
               </ProposalCardContent>

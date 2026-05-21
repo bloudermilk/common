@@ -1,14 +1,14 @@
-import { db } from "@op/db/client";
+import { db } from '@op/db/client';
 import {
   ProposalStatus,
   decisionsVoteProposals,
   decisionsVoteSubmissions,
-} from "@op/db/schema";
-import { TRPCError } from "@trpc/server";
-import { describe, expect, it } from "vitest";
+} from '@op/db/schema';
+import { TRPCError } from '@trpc/server';
+import { describe, expect, it } from 'vitest';
 
-import { TestDecisionsDataManager } from "../../../test/helpers/TestDecisionsDataManager";
-import { createAuthenticatedCaller } from "../../../test/supabase-utils";
+import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDataManager';
+import { createAuthenticatedCaller } from '../../../test/supabase-utils';
 
 /**
  * Directly inserts a vote submission + vote proposals join rows for a given
@@ -30,16 +30,16 @@ async function seedBallot({
       processInstanceId,
       submittedByProfileId: voterProfileId,
       voteData: {
-        schemaVersion: "1.0.0",
-        schemaType: "simple",
+        schemaVersion: '1.0.0',
+        schemaType: 'simple',
         submissionMetadata: { timestamp: new Date().toISOString() },
-        validationSignature: "test-signature",
+        validationSignature: 'test-signature',
       },
     })
     .returning({ id: decisionsVoteSubmissions.id });
 
   if (!submission) {
-    throw new Error("Failed to seed vote submission");
+    throw new Error('Failed to seed vote submission');
   }
 
   if (proposalIds.length > 0) {
@@ -54,8 +54,8 @@ async function seedBallot({
   return submission;
 }
 
-describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
-  it("returns only the proposals a voter voted on when they query their own ballot", async ({
+describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
+  it('returns only the proposals a voter voted on when they query their own ballot', async ({
     task,
     onTestFinished,
   }) => {
@@ -68,7 +68,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error("No instance created");
+      throw new Error('No instance created');
     }
 
     // Create a voter and a submitter; the submitter contributes 3 proposals,
@@ -138,7 +138,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error("No instance created");
+      throw new Error('No instance created');
     }
 
     const [voter, snoop] = await Promise.all([
@@ -188,7 +188,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error("No instance created");
+      throw new Error('No instance created');
     }
 
     const voter = await testData.createMemberUser({
@@ -230,7 +230,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
     expect(result.total).toBe(1);
   });
 
-  it("returns accurate voteCount per proposal when includeVoteCounts is true", async ({
+  it('returns accurate voteCount per proposal when includeVoteCounts is true', async ({
     task,
     onTestFinished,
   }) => {
@@ -243,7 +243,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error("No instance created");
+      throw new Error('No instance created');
     }
 
     const [voter, otherVoter, submitter] = await Promise.all([
@@ -320,7 +320,7 @@ describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error("No instance created");
+      throw new Error('No instance created');
     }
 
     const voter = await testData.createMemberUser({
