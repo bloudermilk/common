@@ -1,14 +1,14 @@
-import { db } from '@op/db/client';
+import { db } from "@op/db/client";
 import {
   ProposalStatus,
   decisionsVoteProposals,
   decisionsVoteSubmissions,
-} from '@op/db/schema';
-import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
+} from "@op/db/schema";
+import { TRPCError } from "@trpc/server";
+import { describe, expect, it } from "vitest";
 
-import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDataManager';
-import { createAuthenticatedCaller } from '../../../test/supabase-utils';
+import { TestDecisionsDataManager } from "../../../test/helpers/TestDecisionsDataManager";
+import { createAuthenticatedCaller } from "../../../test/supabase-utils";
 
 /**
  * Directly inserts a vote submission + vote proposals join rows for a given
@@ -30,16 +30,16 @@ async function seedBallot({
       processInstanceId,
       submittedByProfileId: voterProfileId,
       voteData: {
-        schemaVersion: '1.0.0',
-        schemaType: 'simple',
+        schemaVersion: "1.0.0",
+        schemaType: "simple",
         submissionMetadata: { timestamp: new Date().toISOString() },
-        validationSignature: 'test-signature',
+        validationSignature: "test-signature",
       },
     })
     .returning({ id: decisionsVoteSubmissions.id });
 
   if (!submission) {
-    throw new Error('Failed to seed vote submission');
+    throw new Error("Failed to seed vote submission");
   }
 
   if (proposalIds.length > 0) {
@@ -54,8 +54,8 @@ async function seedBallot({
   return submission;
 }
 
-describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
-  it('returns only the proposals a voter voted on when they query their own ballot', async ({
+describe.concurrent("listProposals: votedByProfileId (ballot filter)", () => {
+  it("returns only the proposals a voter voted on when they query their own ballot", async ({
     task,
     onTestFinished,
   }) => {
@@ -68,7 +68,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error('No instance created');
+      throw new Error("No instance created");
     }
 
     // Create a voter and a submitter; the submitter contributes 3 proposals,
@@ -125,7 +125,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
     expect(result.total).toBe(2);
   });
 
-  it('rejects another member trying to view a voter’s ballot', async ({
+  it("rejects another member trying to view a voter's ballot", async ({
     task,
     onTestFinished,
   }) => {
@@ -138,7 +138,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error('No instance created');
+      throw new Error("No instance created");
     }
 
     const [voter, snoop] = await Promise.all([
@@ -175,7 +175,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
     ).rejects.toThrowError(TRPCError);
   });
 
-  it('does not leak the voter’s own drafts into ballot results', async ({
+  it("does not leak the voter's own drafts into ballot results", async ({
     task,
     onTestFinished,
   }) => {
@@ -188,7 +188,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error('No instance created');
+      throw new Error("No instance created");
     }
 
     const voter = await testData.createMemberUser({
@@ -230,7 +230,7 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
     expect(result.total).toBe(1);
   });
 
-  it('rejects a decision admin trying to view another user’s ballot', async ({
+  it("returns accurate voteCount per proposal when includeVoteCounts is true", async ({
     task,
     onTestFinished,
   }) => {
@@ -243,7 +243,84 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
 
     const instance = setup.instances[0];
     if (!instance) {
-      throw new Error('No instance created');
+      throw new Error("No instance created");
+    }
+
+    const [voter, otherVoter, submitter] = await Promise.all([
+      testData.createMemberUser({
+        organization: setup.organization,
+        instanceProfileIds: [instance.profileId],
+      }),
+      testData.createMemberUser({
+        organization: setup.organization,
+        instanceProfileIds: [instance.profileId],
+      }),
+      testData.createMemberUser({
+        organization: setup.organization,
+        instanceProfileIds: [instance.profileId],
+      }),
+    ]);
+
+    const submitterCaller = await createAuthenticatedCaller(submitter.email);
+
+    const proposalA = await testData.createProposal({
+      userEmail: submitter.email,
+      processInstanceId: instance.instance.id,
+      proposalData: { title: `Vote Count A ${task.id}` },
+    });
+    const proposalB = await testData.createProposal({
+      userEmail: submitter.email,
+      processInstanceId: instance.instance.id,
+      proposalData: { title: `Vote Count B ${task.id}` },
+    });
+
+    await Promise.all([
+      submitterCaller.decision.submitProposal({ proposalId: proposalA.id }),
+      submitterCaller.decision.submitProposal({ proposalId: proposalB.id }),
+    ]);
+
+    // Voter votes on both proposals; otherVoter votes only on proposalA.
+    await Promise.all([
+      seedBallot({
+        processInstanceId: instance.instance.id,
+        voterProfileId: voter.profileId,
+        proposalIds: [proposalA.id, proposalB.id],
+      }),
+      seedBallot({
+        processInstanceId: instance.instance.id,
+        voterProfileId: otherVoter.profileId,
+        proposalIds: [proposalA.id],
+      }),
+    ]);
+
+    const voterCaller = await createAuthenticatedCaller(voter.email);
+    const result = await voterCaller.decision.listProposals({
+      processInstanceId: instance.instance.id,
+      votedByProfileId: voter.profileId,
+      includeVoteCounts: true,
+    });
+
+    const byId = Object.fromEntries(result.proposals.map((p) => [p.id, p]));
+    // proposalA was voted on by both voters (count = 2)
+    expect(byId[proposalA.id]?.voteCount).toBe(2);
+    // proposalB was voted on by voter only (count = 1)
+    expect(byId[proposalB.id]?.voteCount).toBe(1);
+  });
+
+  it("rejects a decision admin trying to view another user's ballot", async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error("No instance created");
     }
 
     const voter = await testData.createMemberUser({

@@ -3,8 +3,8 @@ import {
   checkpointVersionSchema,
   proposalSchema,
   rubricTemplateSchema,
-} from '@op/common/client';
-import type { PhaseRules as CommonPhaseRules } from '@op/common/src/services/decision';
+} from "@op/common/client";
+import type { PhaseRules as CommonPhaseRules } from "@op/common/src/services/decision";
 import {
   ProcessStatus,
   ProposalStatus,
@@ -12,11 +12,11 @@ import {
   decisionProcesses,
   processInstances,
   stateTransitionHistory,
-} from '@op/db/schema';
-import { createSelectSchema } from 'drizzle-zod';
-import { z } from 'zod';
+} from "@op/db/schema";
+import { createSelectSchema } from "drizzle-zod";
+import { z } from "zod";
 
-import { baseProfileEncoder } from './profiles';
+import { baseProfileEncoder } from "./profiles";
 
 // JSON Schema types
 const jsonSchemaEncoder = z.record(z.string(), z.unknown());
@@ -36,13 +36,13 @@ export const processPhaseSchema = z.object({
       endDate: z.string().optional(),
     })
     .optional(),
-  type: z.enum(['initial', 'intermediate', 'final']).optional(),
+  type: z.enum(["initial", "intermediate", "final"]).optional(),
   config: z
     .object({
       allowProposals: z.boolean().optional(),
     })
     .optional(),
-  advancementMethod: z.enum(['date', 'manual']).optional(),
+  advancementMethod: z.enum(["date", "manual"]).optional(),
 });
 
 export type ProcessPhase = z.infer<typeof processPhaseSchema>;
@@ -74,7 +74,7 @@ const phaseRulesEncoder = z.object({
     .optional(),
   advancement: z
     .object({
-      method: z.enum(['date', 'manual']),
+      method: z.enum(["date", "manual"]),
       endDate: z.string().optional(),
     })
     .optional(),
@@ -89,7 +89,7 @@ const selectionPipelineBlockEncoder = z.object({
     .array(
       z.object({
         field: z.string(),
-        order: z.enum(['asc', 'desc']).optional(),
+        order: z.enum(["asc", "desc"]).optional(),
       }),
     )
     .optional(),
@@ -269,8 +269,8 @@ export const VISIBLE_DECISION_STATUSES = [
 export const decisionProfileWithSchemaFilterSchema = z.object({
   cursor: z.string().nullish(),
   limit: z.number().min(1).max(100).prefault(10),
-  orderBy: z.enum(['createdAt', 'updatedAt', 'name']).prefault('updatedAt'),
-  dir: z.enum(['asc', 'desc']).prefault('desc'),
+  orderBy: z.enum(["createdAt", "updatedAt", "name"]).prefault("updatedAt"),
+  dir: z.enum(["asc", "desc"]).prefault("desc"),
   search: z.string().optional(),
   status: z.array(z.enum(ProcessStatus)).optional(),
   ownerProfileId: z.uuid().optional(),
@@ -315,7 +315,7 @@ const processSchemaEncoder = z
 // Instance Data Encoder that supports both new and legacy field names
 const instanceDataEncoder = z.preprocess(
   (data) => {
-    if (typeof data !== 'object' || data === null) {
+    if (typeof data !== "object" || data === null) {
       return data;
     }
     const obj = data as Record<string, unknown>;
@@ -325,7 +325,7 @@ const instanceDataEncoder = z.preprocess(
     // - phases[].plannedEndDate → phases[].endDate
     const phases = Array.isArray(obj.phases)
       ? obj.phases.map((phase) => {
-          if (typeof phase !== 'object' || phase === null) {
+          if (typeof phase !== "object" || phase === null) {
             return phase;
           }
           const p = phase as Record<string, unknown>;
@@ -585,7 +585,7 @@ export const proposalFilterSchema = z
     submittedByProfileId: z.uuid().optional(),
     status: z.enum(ProposalStatus).optional(),
     categoryId: z.string().optional(),
-    dir: z.enum(['asc', 'desc']).optional(),
+    dir: z.enum(["asc", "desc"]).optional(),
     /** Phase ID to scope proposals to. Defaults to the current phase when omitted. */
     phaseId: z.string().optional(),
     /**
@@ -595,7 +595,9 @@ export const proposalFilterSchema = z
      */
     votedByProfileId: z.uuid().optional(),
     /** When set to 'results', all proposals are returned as non-editable */
-    phase: z.enum(['results']).optional(),
+    phase: z.enum(["results"]).optional(),
+    /** When true, each returned proposal includes a voteCount from vote submissions on the instance. */
+    includeVoteCounts: z.boolean().optional(),
   })
   .extend(paginationInputSchema.shape);
 
@@ -614,8 +616,8 @@ export const decisionProfileListEncoder = z.object({
 export const decisionProfileFilterSchema = z.object({
   cursor: z.string().nullish(),
   limit: z.number().min(1).max(100).prefault(10),
-  orderBy: z.enum(['createdAt', 'updatedAt', 'name']).prefault('updatedAt'),
-  dir: z.enum(['asc', 'desc']).prefault('desc'),
+  orderBy: z.enum(["createdAt", "updatedAt", "name"]).prefault("updatedAt"),
+  dir: z.enum(["asc", "desc"]).prefault("desc"),
   search: z.string().optional(),
   status: z.enum(ProcessStatus).optional(),
   ownerProfileId: z.uuid().optional(),
@@ -635,7 +637,7 @@ export type InstancePhaseData = z.infer<typeof instancePhaseDataEncoder>;
 export type InstanceData = z.infer<typeof instanceDataWithSchemaEncoder>;
 
 // Re-export shared types from @op/common so consumers can import from either package
-export type { Proposal, ProposalList } from '@op/common/client';
+export type { Proposal, ProposalList } from "@op/common/client";
 
 // Legacy type exports (for backwards compatibility during migration)
 export type LegacyDecisionProfile = z.infer<typeof decisionProfileEncoder>;
