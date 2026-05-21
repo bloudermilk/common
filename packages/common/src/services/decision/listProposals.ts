@@ -3,7 +3,6 @@ import {
   ProfileRelationshipType,
   ProposalStatus,
   Visibility,
-  decisionProcessResults,
   decisionsVoteProposals,
   decisionsVoteSubmissions,
   posts,
@@ -405,11 +404,11 @@ export const listProposals = async ({
   const isBallotView = !!input.votedByProfileId;
   let resultsPublished = false;
   if (isBallotView) {
-    const publishedResult = await db._query.decisionProcessResults.findFirst({
-      where: and(
-        eq(decisionProcessResults.processInstanceId, processInstanceId),
-        eq(decisionProcessResults.success, true),
-      ),
+    const publishedResult = await db.query.decisionProcessResults.findFirst({
+      where: {
+        processInstanceId,
+        success: true,
+      },
       columns: { id: true },
     });
     resultsPublished = !!publishedResult;
