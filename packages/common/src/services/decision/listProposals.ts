@@ -3,6 +3,7 @@ import {
   ProfileRelationshipType,
   ProposalStatus,
   Visibility,
+  decisionProcessResults,
   decisionsVoteProposals,
   decisionsVoteSubmissions,
   posts,
@@ -62,6 +63,8 @@ export interface ListProposalsInput {
    * When true, each returned proposal carries a `voteCount` aggregated from
    * vote submissions on `processInstanceId`. Pair with `orderBy: 'votes'` to
    * have the database drive the sort (descending count, createdAt tiebreak).
+   * When used with `votedByProfileId`, counts are only returned after results
+   * are formally published (gate prevents live-tally exposure during voting).
    */
   includeVoteCounts?: boolean;
 }
@@ -392,6 +395,30 @@ export const listProposals = async ({
 
   const { includeVoteCounts = false } = input;
 
+  // Ballot views (votedByProfileId) always include voteCount, but the count is
+  // gated on a published results record so voters can't see live tallies during
+  // voting. resultsPublished=true means the subquery runs; false means the field
+  // is returned as null so the frontend doesn't need to handle undefined.
+  // Internal callers (e.g. listSelectionCandidates) use proposalIds without
+  // votedByProfileId and are exempt from this gate — they control includeVoteCounts
+  // directly.
+  const isBallotView = !!input.votedByProfileId;
+  let resultsPublished = false;
+  if (isBallotView) {
+    const publishedResult = await db._query.decisionProcessResults.findFirst({
+      where: and(
+        eq(decisionProcessResults.processInstanceId, processInstanceId),
+        eq(decisionProcessResults.success, true),
+      ),
+      columns: { id: true },
+    });
+    resultsPublished = !!publishedResult;
+  }
+
+  const effectiveIncludeVoteCounts = isBallotView
+    ? resultsPublished
+    : includeVoteCounts;
+
   // Vote-count correlated subquery factory. Called by both the `extras`
   // callback and the `orderBy` callback so each receives the v2-aliased
   // `table` and embeds the correct outer-column reference.
@@ -420,7 +447,7 @@ export const listProposals = async ({
       },
       limit,
       offset,
-      ...(includeVoteCounts && {
+      ...(effectiveIncludeVoteCounts && {
         extras: {
           voteCount: (table, { sql: sqlOp }) =>
             sqlOp<number>`${voteCountExpr(table)}`.as('vote_count'),
@@ -615,12 +642,17 @@ export const listProposals = async ({
       isEditable,
       documentContent: documentContentMap.get(proposal.id),
       proposalTemplate,
-      ...(includeVoteCounts && {
-        voteCount: Number(
-          (proposal as ProposalListItem & { voteCount?: number | string })
-            .voteCount ?? 0,
-        ),
-      }),
+      ...(isBallotView
+        ? {
+            voteCount: resultsPublished
+              ? Number('voteCount' in proposal ? (proposal.voteCount ?? 0) : 0)
+              : null,
+          }
+        : effectiveIncludeVoteCounts && {
+            voteCount: Number(
+              'voteCount' in proposal ? (proposal.voteCount ?? 0) : 0,
+            ),
+          }),
     };
   });
 

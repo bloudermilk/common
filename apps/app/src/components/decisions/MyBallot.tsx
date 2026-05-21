@@ -79,7 +79,6 @@ const MyBallotProposals = ({
   const [proposalsData] = trpc.decision.listProposals.useSuspenseQuery({
     processInstanceId: instanceId,
     votedByProfileId,
-    includeVoteCounts: true,
   });
 
   return (

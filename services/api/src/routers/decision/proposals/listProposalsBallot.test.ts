@@ -1,6 +1,7 @@
 import { db } from '@op/db/client';
 import {
   ProposalStatus,
+  decisionProcessResults,
   decisionsVoteProposals,
   decisionsVoteSubmissions,
 } from '@op/db/schema';
@@ -294,17 +295,39 @@ describe.concurrent('listProposals: votedByProfileId (ballot filter)', () => {
     ]);
 
     const voterCaller = await createAuthenticatedCaller(voter.email);
-    const result = await voterCaller.decision.listProposals({
+
+    // Without a published results record, voteCount must be null — prevents
+    // live tally exposure during voting.
+    const resultBeforePublish = await voterCaller.decision.listProposals({
       processInstanceId: instance.instance.id,
       votedByProfileId: voter.profileId,
-      includeVoteCounts: true,
+    });
+    const byIdBefore = Object.fromEntries(
+      resultBeforePublish.proposals.map((p) => [p.id, p]),
+    );
+    expect(byIdBefore[proposalA.id]?.voteCount).toBeNull();
+    expect(byIdBefore[proposalB.id]?.voteCount).toBeNull();
+
+    // Seed a published results record (simulates the pipeline completing).
+    await db.insert(decisionProcessResults).values({
+      processInstanceId: instance.instance.id,
+      success: true,
+      selectedCount: 2,
+      voterCount: 2,
     });
 
-    const byId = Object.fromEntries(result.proposals.map((p) => [p.id, p]));
+    // After publication, accurate counts are returned.
+    const resultAfterPublish = await voterCaller.decision.listProposals({
+      processInstanceId: instance.instance.id,
+      votedByProfileId: voter.profileId,
+    });
+    const byIdAfter = Object.fromEntries(
+      resultAfterPublish.proposals.map((p) => [p.id, p]),
+    );
     // proposalA was voted on by both voters (count = 2)
-    expect(byId[proposalA.id]?.voteCount).toBe(2);
+    expect(byIdAfter[proposalA.id]?.voteCount).toBe(2);
     // proposalB was voted on by voter only (count = 1)
-    expect(byId[proposalB.id]?.voteCount).toBe(1);
+    expect(byIdAfter[proposalB.id]?.voteCount).toBe(1);
   });
 
   it("rejects a decision admin trying to view another user's ballot", async ({

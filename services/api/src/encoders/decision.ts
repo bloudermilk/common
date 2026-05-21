@@ -596,8 +596,6 @@ export const proposalFilterSchema = z
     votedByProfileId: z.uuid().optional(),
     /** When set to 'results', all proposals are returned as non-editable */
     phase: z.enum(['results']).optional(),
-    /** When true, each returned proposal includes a voteCount from vote submissions on the instance. */
-    includeVoteCounts: z.boolean().optional(),
   })
   .extend(paginationInputSchema.shape);
 
