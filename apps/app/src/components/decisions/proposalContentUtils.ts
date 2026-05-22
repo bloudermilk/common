@@ -4,6 +4,7 @@ import {
   SYSTEM_FIELD_KEYS,
   type XFormat,
   assembleProposalData,
+  normalizeBudget,
   parseProposalData,
   serverExtensions,
 } from '@op/common/client';
@@ -121,11 +122,22 @@ export function resolveProposalSystemFields(proposal: Proposal) {
 
   const resolved = assembleProposalData(template, fragmentTexts);
 
+  // `assembleProposalData` returns a bare number for legacy `{type: 'number'}`
+  // budget templates so the JSON-schema validator gets a value it can check.
+  // Renderers need `{amount, currency}` — normalize, then prefer the fallback's
+  // currency since the legacy path strips it off the fragment value.
+  const normalizedResolvedBudget = normalizeBudget(resolved.budget);
+  const resolvedBudget =
+    normalizedResolvedBudget && fallback.budget?.currency
+      ? {
+          ...normalizedResolvedBudget,
+          currency: fallback.budget.currency,
+        }
+      : normalizedResolvedBudget;
+
   return {
     ...fallback,
     ...(resolved.title != null && { title: resolved.title as string }),
-    ...(resolved.budget != null && {
-      budget: resolved.budget as typeof fallback.budget,
-    }),
+    ...(resolvedBudget != null && { budget: resolvedBudget }),
   };
 }
