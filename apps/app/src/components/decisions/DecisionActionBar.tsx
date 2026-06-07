@@ -1,6 +1,7 @@
 'use client';
 
 import { trpc } from '@op/api/client';
+import { createSBBrowserClient } from '@op/supabase/client';
 import { Button } from '@op/ui/Button';
 import { Dialog, DialogTrigger } from '@op/ui/Dialog';
 import { LoadingSpinner } from '@op/ui/LoadingSpinner';
@@ -21,38 +22,61 @@ export const DecisionActionBar = ({
   label,
   markup = false,
   showSubmitButton = false,
+  joinPublicInstanceBeforeCreate = false,
 }: {
   instanceId: string;
   description?: string;
   label?: string;
   markup?: boolean;
   showSubmitButton?: boolean;
+  joinPublicInstanceBeforeCreate?: boolean;
 }) => {
   const t = useTranslations();
   const { slug } = useParams();
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
+  const supabase = createSBBrowserClient();
+
+  const joinPublicInstanceMutation =
+    trpc.decision.joinPublicInstance.useMutation();
 
   const createProposalMutation = trpc.decision.createProposal.useMutation({
     onSuccess: (proposal) => {
       // Navigate to edit the newly created draft proposal
       router.push(`/decisions/${slug}/proposal/${proposal.profileId}/edit`);
     },
-    onError: (error) => {
+  });
+
+  const handleCreateProposal = async () => {
+    setIsCreating(true);
+
+    try {
+      if (joinPublicInstanceBeforeCreate) {
+        const { data } = await supabase.auth.getUser();
+
+        if (!data.user) {
+          const { error } = await supabase.auth.signInAnonymously();
+          if (error) {
+            throw error;
+          }
+        }
+
+        await joinPublicInstanceMutation.mutateAsync({
+          processInstanceId: instanceId,
+        });
+      }
+
+      await createProposalMutation.mutateAsync({
+        processInstanceId: instanceId,
+        proposalData: {}, // Empty draft - user will fill in via edit page
+      });
+    } catch (error) {
       setIsCreating(false);
       toast.error({
         title: t('Failed to create proposal'),
-        message: error.message,
+        message: error instanceof Error ? error.message : undefined,
       });
-    },
-  });
-
-  const handleCreateProposal = () => {
-    setIsCreating(true);
-    createProposalMutation.mutate({
-      processInstanceId: instanceId,
-      proposalData: {}, // Empty draft - user will fill in via edit page
-    });
+    }
   };
 
   return (
