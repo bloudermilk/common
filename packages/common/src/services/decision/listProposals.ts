@@ -15,9 +15,11 @@ import { count as countFn } from 'drizzle-orm';
 
 import { UnauthorizedError } from '../../utils';
 import {
+  type ProfileUserWithNormalizedRoles,
   assertInstanceProfileAccess,
   getCurrentProfileId,
   getProfileAccessUser,
+  resolveAccessUserId,
 } from '../access';
 import { getProposalDocumentsContent } from './getProposalDocumentsContent';
 import { getProposalRelationshipData } from './getProposalRelationshipData';
@@ -157,18 +159,17 @@ export const listProposals = async ({
   user,
 }: {
   input: ListProposalsInput;
-  user: User;
+  user: User | undefined;
 }) => {
   const { processInstanceId, skipAccessCheck = false } = input;
 
-  // Skip authentication check if this is a trusted context (e.g., background job)
-  if (!skipAccessCheck && !user) {
-    throw new UnauthorizedError('User must be authenticated');
-  }
-
   // Resolve the caller's profile once; it's reused for ballot auth, the
   // HIDDEN visibility filter, and owner/editable checks further down.
-  const currentProfileId = await getCurrentProfileId(user.id);
+  const currentProfileId = user
+    ? await getCurrentProfileId(user.id)
+    : undefined;
+
+  const accessUserId = resolveAccessUserId(user);
 
   // Fetch the instance row up front and resolve the explicit ID scope in
   // parallel. The row is reused for the phase-resolution context (instead of
@@ -226,7 +227,7 @@ export const listProposals = async ({
     const ids = await getPhaseProposalAndDraftIds({
       instance,
       phaseId: input.phaseId,
-      authUserId: user.id,
+      authUserId: accessUserId,
     });
     return { phaseProposalIds: ids.nonDraftIds, phaseDraftIds: ids.draftIds };
   })();
@@ -235,7 +236,7 @@ export const listProposals = async ({
   // only on the instance row (already fetched), so there's no ordering
   // dependency — the auth check still throws on failure, just slightly later.
   const accessPromise: Promise<{
-    profileUser: Awaited<ReturnType<typeof getProfileAccessUser>>;
+    profileUser: ProfileUserWithNormalizedRoles | undefined;
     canManageProposals: boolean;
   }> = (async () => {
     if (skipAccessCheck) {
@@ -379,7 +380,7 @@ export const listProposals = async ({
               db
                 .select({ profileId: profileUsers.profileId })
                 .from(profileUsers)
-                .where(eq(profileUsers.authUserId, user.id)),
+                .where(eq(profileUsers.authUserId, accessUserId)),
             ),
           )!,
         )!;

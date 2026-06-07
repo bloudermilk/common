@@ -1,4 +1,11 @@
-import { ProposalStatus } from '@op/db/schema';
+import { createPublicParticipantRole } from '@op/common';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
+import { db } from '@op/db/client';
+import {
+  ProposalStatus,
+  profileUserToAccessRoles,
+  profileUsers,
+} from '@op/db/schema';
 import { describe, expect, it } from 'vitest';
 
 import { appRouter } from '../..';
@@ -6,7 +13,6 @@ import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDat
 import {
   accessTierGatingCell,
   describeDecisionAccessTierGating,
-  expectFailsAccessTierGate,
 } from '../../../test/helpers/gating/decision';
 import {
   createIsolatedSession,
@@ -161,11 +167,58 @@ describe.concurrent('getDecisionBySlug', () => {
     expect(result.processInstance.proposalCount).toBe(1);
     expect(result.processInstance.participantCount).toBe(1);
   });
-});
 
+  it('allows a no-JWT (public) caller to resolve a public decision by slug', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error('No instance created');
+    }
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId: instance.profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId: instance.profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.getDecisionBySlug({
+      slug: instance.slug,
+    });
+
+    expect(result.slug).toBe(instance.slug);
+    expect(result.processInstance).toBeDefined();
+    expect(result.processInstance.access?.admin).toBe(false);
+  });
+});
 describeDecisionAccessTierGating('getDecisionBySlug', {
   noJwtNonPublic: accessTierGatingCell(
-    'rejects no-JWT caller on non-public instance',
+    'rejects no-JWT caller at the service layer (no membership)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -180,15 +233,14 @@ describeDecisionAccessTierGating('getDecisionBySlug', {
 
       const caller = await callers.noJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getDecisionBySlug({ slug: instance.slug }),
-        'none',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   anonJwtNonPublic: accessTierGatingCell(
-    'rejects anon-JWT caller on non-public instance',
+    'rejects anon-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -203,15 +255,14 @@ describeDecisionAccessTierGating('getDecisionBySlug', {
 
       const caller = await callers.anonJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getDecisionBySlug({ slug: instance.slug }),
-        'anon',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   userJwtNonPublic: accessTierGatingCell(
-    'rejects user-JWT caller on non-public instance',
+    'rejects out-of-network user-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -226,15 +277,14 @@ describeDecisionAccessTierGating('getDecisionBySlug', {
 
       const caller = await callers.userJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getDecisionBySlug({ slug: instance.slug }),
-        'user',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   networkJwtNonPublic: accessTierGatingCell(
-    'admits network-JWT caller on non-public instance',
+    'admits network member and resolves the decision',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 

@@ -1,4 +1,6 @@
 import { mockCollab, textFragment } from '@op/collab/testing';
+import { createPublicParticipantRole } from '@op/common';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db } from '@op/db/client';
 import {
   ProposalStatus,
@@ -21,7 +23,6 @@ import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDat
 import {
   accessTierGatingCell,
   describeDecisionAccessTierGating,
-  expectFailsAccessTierGate,
 } from '../../../test/helpers/gating/decision';
 import {
   createIsolatedSession,
@@ -1581,11 +1582,69 @@ describe.concurrent('getProposal', () => {
     expect(result.id).toBe(proposal.id);
     expect(result.status).toBe(ProposalStatus.SUBMITTED);
   });
-});
 
+  it('allows a no-JWT (public) caller to read a proposal in a public decision', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error('No instance created');
+    }
+
+    const proposal = await testData.createProposal({
+      userEmail: setup.userEmail,
+      processInstanceId: instance.instance.id,
+      proposalData: { title: 'Public Proposal' },
+    });
+
+    // Submit so the draft existence-gate doesn't apply.
+    await db
+      .update(proposals)
+      .set({ status: ProposalStatus.SUBMITTED })
+      .where(eq(proposals.id, proposal.id));
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId: instance.profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId: instance.profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.getProposal({
+      profileId: proposal.profileId,
+    });
+
+    expect(result.id).toBe(proposal.id);
+    expect(result.status).toBe(ProposalStatus.SUBMITTED);
+  });
+});
 describeDecisionAccessTierGating('getProposal', {
   noJwtNonPublic: accessTierGatingCell(
-    'rejects no-JWT caller on non-public instance',
+    'rejects no-JWT caller at the service layer (no identity)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -1605,15 +1664,14 @@ describeDecisionAccessTierGating('getProposal', {
 
       const caller = await callers.noJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getProposal({ profileId: proposal.profileId }),
-        'none',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   anonJwtNonPublic: accessTierGatingCell(
-    'rejects anon-JWT caller on non-public instance',
+    'rejects anon-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -1630,18 +1688,23 @@ describeDecisionAccessTierGating('getProposal', {
         processInstanceId: instance.instance.id,
         proposalData: { title: 'anon should bounce' },
       });
+      // Submit so the draft existence-gate doesn't mask the READ membership
+      // check — we want to assert the READ denial here.
+      await db
+        .update(proposals)
+        .set({ status: ProposalStatus.SUBMITTED })
+        .where(eq(proposals.id, proposal.id));
 
       const caller = await callers.anonJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getProposal({ profileId: proposal.profileId }),
-        'anon',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   userJwtNonPublic: accessTierGatingCell(
-    'rejects user-JWT caller on non-public instance',
+    'rejects out-of-network user-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -1658,18 +1721,23 @@ describeDecisionAccessTierGating('getProposal', {
         processInstanceId: instance.instance.id,
         proposalData: { title: 'anon should bounce' },
       });
+      // Submit so the draft existence-gate doesn't mask the READ membership
+      // check — we want to assert the READ denial here.
+      await db
+        .update(proposals)
+        .set({ status: ProposalStatus.SUBMITTED })
+        .where(eq(proposals.id, proposal.id));
 
       const caller = await callers.userJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getProposal({ profileId: proposal.profileId }),
-        'user',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   networkJwtNonPublic: accessTierGatingCell(
-    'admits network-JWT caller on non-public instance',
+    'admits network member and returns the proposal',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 

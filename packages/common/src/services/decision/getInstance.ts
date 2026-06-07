@@ -6,6 +6,7 @@ import type { NormalizedRole } from 'access-zones';
 
 import { NotFoundError, UnauthorizedError } from '../../utils';
 import {
+  type AccessUser,
   assertInstanceProfileAccess,
   getOrgAccessUser,
   getProfileAccessUser,
@@ -17,7 +18,7 @@ import type { DecisionInstanceData } from './schemas/instanceData';
 
 export interface GetInstanceInput {
   instanceId: string;
-  user: User;
+  user: User | undefined;
 }
 
 const ALL_TRUE_ACCESS: DecisionRolePermissions = {
@@ -36,7 +37,7 @@ const getRolesDecisionBits = (roles: NormalizedRole[]): number =>
   collapseRoles(roles)['decisions'] ?? 0;
 
 const resolveInstanceAccess = async (
-  user: { id: string },
+  user: AccessUser | undefined,
   instance: { profileId: string; ownerProfileId: string | null },
   profileUser: Awaited<ReturnType<typeof getProfileAccessUser>>,
 ): Promise<DecisionRolePermissions> => {

@@ -1,7 +1,11 @@
+import { createPublicParticipantRole } from '@op/common';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db } from '@op/db/client';
 import {
   decisionProcessResultSelections,
   decisionProcessResults,
+  profileUserToAccessRoles,
+  profileUsers,
 } from '@op/db/schema';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +15,6 @@ import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDat
 import {
   accessTierGatingCell,
   describeDecisionAccessTierGating,
-  expectFailsAccessTierGate,
 } from '../../../test/helpers/gating/decision';
 import {
   createIsolatedSession,
@@ -573,11 +576,78 @@ describe.concurrent('getLatestSelectionForProposal', () => {
       selectionRank: 1,
     });
   });
-});
 
+  it('allows a no-JWT (public) caller to read a selection in a public decision', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const { instance, profileId } = setup.instances[0]!;
+    const proposal = await testData.createProposal({
+      userEmail: setup.userEmail,
+      processInstanceId: instance.id,
+      proposalData: { title: 'Public selection' },
+    });
+
+    const [resultRow] = await db
+      .insert(decisionProcessResults)
+      .values({
+        processInstanceId: instance.id,
+        success: true,
+        selectedCount: 1,
+      })
+      .returning();
+
+    await db.insert(decisionProcessResultSelections).values({
+      processResultId: resultRow!.id,
+      proposalId: proposal.id,
+      allocated: '999',
+      selectionRank: 1,
+    });
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.getLatestSelectionForProposal({
+      proposalId: proposal.id,
+    });
+
+    expect(result).toEqual({
+      proposalId: proposal.id,
+      allocated: '999',
+      selectionRank: 1,
+    });
+  });
+});
 describeDecisionAccessTierGating('getLatestSelectionForProposal', {
   noJwtNonPublic: accessTierGatingCell(
-    'rejects no-JWT caller on non-public instance',
+    'rejects no-JWT caller at the service layer (no membership)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -596,17 +666,16 @@ describeDecisionAccessTierGating('getLatestSelectionForProposal', {
 
       const caller = await callers.noJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getLatestSelectionForProposal({
           proposalId: proposal.id,
         }),
-        'none',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   anonJwtNonPublic: accessTierGatingCell(
-    'rejects anon-JWT caller on non-public instance',
+    'rejects anon-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -625,17 +694,16 @@ describeDecisionAccessTierGating('getLatestSelectionForProposal', {
 
       const caller = await callers.anonJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getLatestSelectionForProposal({
           proposalId: proposal.id,
         }),
-        'anon',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   userJwtNonPublic: accessTierGatingCell(
-    'rejects user-JWT caller on non-public instance',
+    'rejects out-of-network user-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -654,17 +722,16 @@ describeDecisionAccessTierGating('getLatestSelectionForProposal', {
 
       const caller = await callers.userJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getLatestSelectionForProposal({
           proposalId: proposal.id,
         }),
-        'user',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   networkJwtNonPublic: accessTierGatingCell(
-    'admits network-JWT caller on non-public instance',
+    'admits network member and returns the selection (null when none recorded)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({

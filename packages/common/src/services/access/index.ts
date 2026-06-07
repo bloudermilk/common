@@ -1,4 +1,5 @@
 import { cache } from '@op/cache';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db, eq } from '@op/db/client';
 import { organizations, users } from '@op/db/schema';
 import type { User } from '@op/supabase/lib';
@@ -22,20 +23,43 @@ export type ProfileUserWithNormalizedRoles = ProfileUserBase & {
   profile: ProfileMinimal;
 };
 
+/**
+ * The caller identity the access layer needs. A subset of the Supabase `User`
+ * (only the id is read today); widen the `Pick` as later auth work needs more
+ * fields. Optional throughout the access layer so a future no-JWT (public)
+ * caller can be represented as `undefined` — resolvers fail closed on it.
+ */
+export type AccessUser = Pick<User, 'id'>;
+
+/**
+ * Resolves the auth-user id the access layer queries grants for. A no-JWT
+ * (public) caller — represented as `undefined` — is substituted with the
+ * {@link GLOBAL_USER_PUBLIC} sentinel, so it resolves only grants explicitly
+ * made to the public (none by default → fails closed; a profile/org becomes
+ * publicly accessible by granting that sentinel a role on it). Anonymous
+ * (anon-JWT) callers have a real id and are not substituted. Always returns a
+ * concrete id, so an undefined id can never drop the `authUserId` filter
+ * (Drizzle skips undefined conditions — the fail-open trap).
+ */
+export const resolveAccessUserId = (user?: AccessUser): string =>
+  user?.id ?? GLOBAL_USER_PUBLIC;
+
 // gets a user assuming that the user is authenticated
 export const getOrgAccessUser = memoize(
   async ({
     user,
     organizationId,
   }: {
-    user: { id: string };
+    user?: AccessUser;
     organizationId: string;
   }): Promise<OrgUserWithNormalizedRoles | undefined> => {
+    const authUserId = resolveAccessUserId(user);
+
     const getOrgUser = async () => {
       const orgUser = await db.query.organizationUsers.findFirst({
         where: {
           organizationId,
-          authUserId: user.id,
+          authUserId,
         },
         with: {
           roles: {
@@ -72,14 +96,15 @@ export const getOrgAccessUser = memoize(
 
     return cache({
       type: 'orgUser',
-      params: [organizationId, user.id],
+      params: [organizationId, authUserId],
       fetch: getOrgUser,
       options: {
         skipMemCache: true,
       },
     });
   },
-  ({ user, organizationId }) => `${user.id}:${organizationId}`,
+  ({ user, organizationId }) =>
+    `${resolveAccessUserId(user)}:${organizationId}`,
 );
 
 // gets a user's access for a specific profile
@@ -88,13 +113,15 @@ export const getProfileAccessUser = memoize(
     user,
     profileId,
   }: {
-    user: { id: string };
+    user?: AccessUser;
     profileId: string;
   }): Promise<ProfileUserWithNormalizedRoles | undefined> => {
+    const authUserId = resolveAccessUserId(user);
+
     const profileUser = await db.query.profileUsers.findFirst({
       where: {
         profileId,
-        authUserId: user.id,
+        authUserId,
       },
       with: {
         profile: {
@@ -132,7 +159,7 @@ export const getProfileAccessUser = memoize(
       roles: normalizedRoles,
     };
   },
-  ({ user, profileId }) => `${user.id}:${profileId}`,
+  ({ user, profileId }) => `${resolveAccessUserId(user)}:${profileId}`,
 );
 
 /**
@@ -141,6 +168,10 @@ export const getProfileAccessUser = memoize(
  *
  * Uses `instance.profileId` for the profile-level check and
  * `instance.ownerProfileId` for the org-level fallback lookup.
+ *
+ * `user` is optional: a missing caller fails closed inside the resolvers
+ * (`getProfileAccessUser` / `getOrgAccessUser` reject an undefined id), so
+ * callers on an open procedure can pass `undefined` straight through.
  */
 export const assertInstanceProfileAccess = async ({
   user,
@@ -148,7 +179,7 @@ export const assertInstanceProfileAccess = async ({
   profilePermissions,
   orgFallbackPermissions,
 }: {
-  user: { id: string };
+  user?: AccessUser;
   instance: { profileId: string | null; ownerProfileId: string | null };
   profilePermissions: AccessZonePermissionInput;
   orgFallbackPermissions: AccessZonePermissionInput;
@@ -288,7 +319,7 @@ export const getCurrentOrgUserId = async (
   }
 
   const orgUser = await getOrgAccessUser({
-    user: { id: session.user.authUserId } as User,
+    user: { id: session.user.authUserId },
     organizationId,
   });
 

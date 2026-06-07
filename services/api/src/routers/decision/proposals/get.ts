@@ -1,16 +1,20 @@
-import { cache } from '@op/cache';
 import { Channels, getPermissionsOnProposal, getProposal } from '@op/common';
 import { proposalSchema } from '@op/common/client';
-import { ProposalStatus } from '@op/db/schema';
 import { logger } from '@op/logging';
 import { waitUntil } from '@vercel/functions';
 import { z } from 'zod';
 
-import { networkAuthenticatedProcedure, router } from '../../../trpcFactory';
+import { openProcedure, router } from '../../../trpcFactory';
 import { trackProposalViewed } from '../../../utils/analytics';
 
 export const getProposalRouter = router({
-  getProposal: networkAuthenticatedProcedure()
+  /**
+   * NOTE: not wrapped in a shared `cache()` here. The cache key is keyed by
+   * profileId only (no caller identity), so a cache hit would serve the
+   * proposal to a non-member and bypass the authz inside `getProposal`. The
+   * proposal is fetched (and authorized) on every request.
+   */
+  getProposal: openProcedure()
     .input(
       z.object({
         profileId: z.uuid(),
@@ -22,17 +26,9 @@ export const getProposalRouter = router({
       const { profileId } = input;
 
       // Fetch proposal (includes documentContent)
-      const proposal = await cache({
-        type: 'profile',
-        params: [profileId],
-        fetch: () =>
-          getProposal({
-            profileId,
-            user,
-          }),
-        options: {
-          skipCacheWrite: (result) => result.status === ProposalStatus.DRAFT,
-        },
+      const proposal = await getProposal({
+        profileId,
+        user,
       });
 
       // Fetch permissions
@@ -47,15 +43,20 @@ export const getProposalRouter = router({
         return { access: undefined };
       });
 
-      // Track proposal viewed event
+      // Track proposal viewed event (only for authenticated callers).
       if (
+        user &&
         proposal.processInstance &&
         typeof proposal.processInstance === 'object' &&
         !Array.isArray(proposal.processInstance) &&
         'id' in proposal.processInstance
       ) {
         waitUntil(
-          trackProposalViewed(ctx, proposal.processInstance.id, proposal.id),
+          trackProposalViewed(
+            { ...ctx, user },
+            proposal.processInstance.id,
+            proposal.id,
+          ),
         );
       }
 

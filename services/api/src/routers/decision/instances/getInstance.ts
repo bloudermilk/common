@@ -9,7 +9,11 @@ import {
   legacyGetInstanceInputSchema,
   legacyProcessInstanceEncoder,
 } from '../../../encoders/legacyDecision';
-import { networkAuthenticatedProcedure, router } from '../../../trpcFactory';
+import {
+  networkAuthenticatedProcedure,
+  openProcedure,
+  router,
+} from '../../../trpcFactory';
 import { trackProcessViewed } from '../../../utils/analytics';
 
 /**
@@ -63,7 +67,7 @@ export const getLegacyInstanceRouter = router({
  * Only supports new decision-making schemas.
  */
 export const getInstanceRouter = router({
-  getInstance: networkAuthenticatedProcedure({
+  getInstance: openProcedure({
     rateLimit: { windowSize: 10, maxRequests: 30 },
   })
     .input(getInstanceInputSchema)
@@ -76,8 +80,10 @@ export const getInstanceRouter = router({
         user,
       });
 
-      // Track process viewed event
-      waitUntil(trackProcessViewed(ctx, input.instanceId));
+      // Track process viewed event (only for authenticated callers).
+      if (user) {
+        waitUntil(trackProcessViewed({ ...ctx, user }, input.instanceId));
+      }
 
       ctx.registerQueryChannels([Channels.decisionInstance(input.instanceId)]);
 

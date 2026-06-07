@@ -1,7 +1,11 @@
+import { createPublicParticipantRole } from '@op/common';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db, eq, inArray } from '@op/db/client';
 import {
   organizationUsers,
   processInstances,
+  profileUserToAccessRoles,
+  profileUsers,
   taxonomies,
   taxonomyTerms,
 } from '@op/db/schema';
@@ -13,7 +17,6 @@ import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDat
 import {
   accessTierGatingCell,
   describeDecisionAccessTierGating,
-  expectFailsAccessTierGate,
 } from '../../../test/helpers/gating/decision';
 import {
   createIsolatedSession,
@@ -500,11 +503,76 @@ describe.concurrent('getCategories category matching', () => {
       }),
     );
   });
-});
 
+  it('allows a no-JWT (public) caller to read categories for a public decision', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error('No instance created');
+    }
+
+    const { termRecords } = await seedProposalTaxonomy(
+      ['Public Category'],
+      onTestFinished,
+    );
+
+    await injectInstanceCategories(instance.instance.id, [
+      {
+        id: 'cat-1',
+        label: 'Public Category',
+        description: 'A publicly readable category',
+      },
+    ]);
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId: instance.profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId: instance.profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.getCategories({
+      processInstanceId: instance.instance.id,
+    });
+
+    expect(result.categories).toHaveLength(1);
+    expect(result.categories[0]).toEqual(
+      expect.objectContaining({
+        id: termRecords[0]!.id,
+        name: 'Public Category',
+        termUri: 'public-category',
+      }),
+    );
+  });
+});
 describeDecisionAccessTierGating('getCategories', {
   noJwtNonPublic: accessTierGatingCell(
-    'rejects no-JWT caller on non-public instance',
+    'rejects no-JWT caller at the service layer (no membership)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -518,17 +586,16 @@ describeDecisionAccessTierGating('getCategories', {
 
       const caller = await callers.noJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getCategories({
           processInstanceId: instance.instance.id,
         }),
-        'none',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   anonJwtNonPublic: accessTierGatingCell(
-    'rejects anon-JWT caller on non-public instance',
+    'rejects anon-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -542,17 +609,16 @@ describeDecisionAccessTierGating('getCategories', {
 
       const caller = await callers.anonJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getCategories({
           processInstanceId: instance.instance.id,
         }),
-        'anon',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   userJwtNonPublic: accessTierGatingCell(
-    'rejects user-JWT caller on non-public instance',
+    'rejects out-of-network user-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({
@@ -566,17 +632,16 @@ describeDecisionAccessTierGating('getCategories', {
 
       const caller = await callers.userJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.getCategories({
           processInstanceId: instance.instance.id,
         }),
-        'user',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   networkJwtNonPublic: accessTierGatingCell(
-    'admits network-JWT caller on non-public instance',
+    'admits network member and returns categories',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
       const setup = await testData.createDecisionSetup({

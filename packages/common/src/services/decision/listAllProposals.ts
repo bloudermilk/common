@@ -33,7 +33,7 @@ export const listAllProposals = async ({
   user,
 }: {
   input: AllProposalsFilter;
-  user: User;
+  user: User | undefined;
 }) => {
   const { processInstanceId, status, categoryId } = input;
   const limit = input.limit ?? 50;
@@ -45,7 +45,7 @@ export const listAllProposals = async ({
     : undefined;
 
   const [currentProfileId, instance] = await Promise.all([
-    getCurrentProfileId(user.id),
+    user ? getCurrentProfileId(user.id) : undefined,
     db.query.processInstances.findFirst({
       where: { id: processInstanceId },
     }),

@@ -10,6 +10,7 @@ import {
 import { User } from '@op/supabase/lib';
 
 import { NotFoundError, UnauthorizedError } from '../../utils';
+import { resolveAccessUserId } from '../access';
 
 const decisionProfileQueryConfig = {
   with: {
@@ -51,9 +52,11 @@ export const getDecisionBySlug = async ({
   user,
   slug,
 }: {
-  user: User;
+  user: User | undefined;
   slug: string;
 }): Promise<DecisionProfileItem> => {
+  const accessUserId = resolveAccessUserId(user);
+
   const [authAndStatsResult, profile] = await Promise.all([
     // Auth check + aggregations
     db
@@ -67,7 +70,7 @@ export const getDecisionBySlug = async ({
         profileUsers,
         and(
           eq(profileUsers.profileId, profiles.id),
-          eq(profileUsers.authUserId, user.id),
+          eq(profileUsers.authUserId, accessUserId),
         ),
       )
       .innerJoin(processInstances, eq(processInstances.profileId, profiles.id))

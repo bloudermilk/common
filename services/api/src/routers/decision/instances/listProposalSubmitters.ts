@@ -5,14 +5,18 @@ import {
 } from '@op/common';
 import { z } from 'zod';
 
-import { networkAuthenticatedProcedure, router } from '../../../trpcFactory';
+import { openProcedure, router } from '../../../trpcFactory';
 
 const listProposalSubmittersInputSchema = z.object({
   processInstanceId: z.uuid(),
 });
 
 export const listProposalSubmittersRouter = router({
-  listProposalSubmitters: networkAuthenticatedProcedure()
+  /**
+   * Lists the submitter profiles for a decision instance's current-phase,
+   * non-draft, VISIBLE proposals (the participation face-pile).
+   */
+  listProposalSubmitters: openProcedure()
     .input(listProposalSubmittersInputSchema)
     .output(proposalSubmittersListSchema)
     .query(({ ctx, input }) => {

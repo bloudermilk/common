@@ -200,6 +200,47 @@ export async function createDefaultDecisionRoles({
 }
 
 /**
+ * Creates the read-only "Public Participant" role for a decision instance:
+ * READ on the decision (which also governs reading its proposals) and nothing
+ * else — no submit/vote/review/admin. `createDecisionRole` adds profile READ.
+ *
+ * Unlike Admin/Participant, this is intentionally NOT part of
+ * {@link createDefaultDecisionRoles}: a process admin opts a decision into it,
+ * and making the decision publicly readable means granting this role to the
+ * GLOBAL_USER_PUBLIC sentinel (which the access layer substitutes for no-JWT
+ * callers).
+ */
+export async function createPublicParticipantRole({
+  profileId,
+  db = defaultDb,
+}: {
+  profileId: string;
+  db?: DbClient;
+}) {
+  return createDecisionRole({
+    name: 'Public Participant',
+    profileId,
+    permissions: {
+      decisions: {
+        type: 'decision',
+        value: {
+          create: false,
+          read: true,
+          update: false,
+          delete: false,
+          admin: false,
+          inviteMembers: false,
+          review: false,
+          submitProposals: false,
+          vote: false,
+        },
+      },
+    },
+    db,
+  });
+}
+
+/**
  * Get the decision role permissions for a role on the decisions zone.
  */
 export async function getDecisionRole({

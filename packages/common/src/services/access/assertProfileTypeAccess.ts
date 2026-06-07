@@ -1,3 +1,4 @@
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db } from '@op/db/client';
 import { EntityType, profiles } from '@op/db/schema';
 import type { AccessZonePermission, NormalizedRole } from 'access-zones';
@@ -5,6 +6,7 @@ import { assertAccess, permission } from 'access-zones';
 import { inArray } from 'drizzle-orm';
 
 import { ValidationError } from '../../utils/error';
+import type { AccessUser } from './index';
 import { getNormalizedRoles } from './utils';
 
 // Per-profile-type permission policy. Omitting a type from the record means
@@ -15,7 +17,7 @@ export type ProfileTypePolicies = Partial<
 >;
 
 export type AssertProfileTypeAccessOptions = {
-  user: { id: string };
+  user?: AccessUser;
   profileIds: string[];
   policies: ProfileTypePolicies;
 };
@@ -54,9 +56,12 @@ export const assertProfileTypeAccess = async ({
     return;
   }
 
+  // Public sentinel for a no-JWT caller; never a raw undefined (fail-open).
+  const accessUserId = user?.id ?? GLOBAL_USER_PUBLIC;
+
   const profileUsers = await db.query.profileUsers.findMany({
     where: {
-      authUserId: user.id,
+      authUserId: accessUserId,
       profileId: { in: gatedRows.map((row) => row.id) },
     },
     with: {

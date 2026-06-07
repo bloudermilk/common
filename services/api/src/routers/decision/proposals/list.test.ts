@@ -1,4 +1,6 @@
 import { mockCollab, textFragment } from '@op/collab/testing';
+import { createPublicParticipantRole } from '@op/common';
+import { GLOBAL_USER_PUBLIC } from '@op/core';
 import { db } from '@op/db/client';
 import {
   ProcessStatus,
@@ -21,7 +23,6 @@ import { TestDecisionsDataManager } from '../../../test/helpers/TestDecisionsDat
 import {
   accessTierGatingCell,
   describeDecisionAccessTierGating,
-  expectFailsAccessTierGate,
 } from '../../../test/helpers/gating/decision';
 import {
   schemaWithPipeline,
@@ -2290,11 +2291,161 @@ describe.concurrent('listProposals: phase-scoped proposal visibility', () => {
     expect([...descIds].sort()).toEqual([p1.id, p2.id, p3.id].sort());
     expect(ascIds).toEqual([...descIds].reverse());
   });
-});
 
+  it('allows a no-JWT (public) caller to list proposals in a public decision', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error('No instance created');
+    }
+
+    const proposal = await testData.createProposal({
+      userEmail: setup.userEmail,
+      processInstanceId: instance.instance.id,
+      proposalData: { title: 'Public Proposal' },
+    });
+
+    // Submit so it isn't filtered out as a draft (drafts are only visible to
+    // their creator/collaborators, which a public caller is not).
+    await db
+      .update(proposals)
+      .set({ status: ProposalStatus.SUBMITTED })
+      .where(eq(proposals.id, proposal.id));
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId: instance.profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId: instance.profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.listProposals({
+      processInstanceId: instance.instance.id,
+    });
+
+    expect(result.proposals.map((p) => p.id)).toContain(proposal.id);
+    expect(result.canManageProposals).toBe(false);
+  });
+
+  it('hides HIDDEN and draft proposals from a public caller and excludes them from the total count', async ({
+    task,
+    onTestFinished,
+  }) => {
+    const testData = new TestDecisionsDataManager(task.id, onTestFinished);
+
+    const setup = await testData.createDecisionSetup({
+      instanceCount: 1,
+      grantAccess: true,
+    });
+
+    const instance = setup.instances[0];
+    if (!instance) {
+      throw new Error('No instance created');
+    }
+
+    const [visibleProposal, hiddenProposal, draftProposal] = await Promise.all([
+      testData.createProposal({
+        userEmail: setup.userEmail,
+        processInstanceId: instance.instance.id,
+        proposalData: { title: 'Public Visible' },
+      }),
+      testData.createProposal({
+        userEmail: setup.userEmail,
+        processInstanceId: instance.instance.id,
+        proposalData: { title: 'Public Hidden' },
+      }),
+      testData.createProposal({
+        userEmail: setup.userEmail,
+        processInstanceId: instance.instance.id,
+        proposalData: { title: 'Public Draft' },
+      }),
+    ]);
+
+    await Promise.all([
+      db
+        .update(proposals)
+        .set({
+          status: ProposalStatus.SUBMITTED,
+          visibility: Visibility.VISIBLE,
+        })
+        .where(eq(proposals.id, visibleProposal.id)),
+      db
+        .update(proposals)
+        .set({
+          status: ProposalStatus.SUBMITTED,
+          visibility: Visibility.HIDDEN,
+        })
+        .where(eq(proposals.id, hiddenProposal.id)),
+      // draftProposal stays a DRAFT (createProposal's default status).
+    ]);
+
+    const publicParticipantRole = await createPublicParticipantRole({
+      profileId: instance.profileId,
+    });
+
+    const [publicProfileUser] = await db
+      .insert(profileUsers)
+      .values({
+        profileId: instance.profileId,
+        authUserId: GLOBAL_USER_PUBLIC,
+      })
+      .returning();
+
+    if (!publicProfileUser) {
+      throw new Error('Failed to create public profileUser');
+    }
+
+    await db.insert(profileUserToAccessRoles).values({
+      profileUserId: publicProfileUser.id,
+      accessRoleId: publicParticipantRole.id,
+    });
+
+    const publicCaller = createCaller(await createTestContextWithSession(null));
+
+    const result = await publicCaller.decision.listProposals({
+      processInstanceId: instance.instance.id,
+    });
+
+    // Only the visible proposal is returned — neither the HIDDEN nor the draft.
+    const returnedIds = result.proposals.map((p) => p.id);
+    expect(returnedIds).toEqual([visibleProposal.id]);
+    expect(returnedIds).not.toContain(hiddenProposal.id);
+    expect(returnedIds).not.toContain(draftProposal.id);
+    // …and the count query (which reuses the same `accessUserId`-scoped WHERE
+    // clause) agrees — the HIDDEN and draft rows leak through neither the
+    // result set nor the total.
+    expect(result.total).toBe(1);
+    expect(result.hasMore).toBe(false);
+  });
+});
 describeDecisionAccessTierGating('listProposals', {
   noJwtNonPublic: accessTierGatingCell(
-    'rejects no-JWT caller at the access-tier gate on non-public instance',
+    'rejects no-JWT caller at the service layer (no membership)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -2309,17 +2460,16 @@ describeDecisionAccessTierGating('listProposals', {
 
       const caller = await callers.noJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.listProposals({
           processInstanceId: instance.instance.id,
         }),
-        'none',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   anonJwtNonPublic: accessTierGatingCell(
-    'rejects anon-JWT caller at the access-tier gate on non-public instance',
+    'rejects anon-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -2334,17 +2484,16 @@ describeDecisionAccessTierGating('listProposals', {
 
       const caller = await callers.anonJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.listProposals({
           processInstanceId: instance.instance.id,
         }),
-        'anon',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   userJwtNonPublic: accessTierGatingCell(
-    'rejects user-JWT caller at the access-tier gate on non-public instance',
+    'rejects out-of-network user-JWT caller at the service layer (not a member)',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
@@ -2359,17 +2508,16 @@ describeDecisionAccessTierGating('listProposals', {
 
       const caller = await callers.userJwt();
 
-      await expectFailsAccessTierGate(
+      await expect(
         caller.decision.listProposals({
           processInstanceId: instance.instance.id,
         }),
-        'user',
-      );
+      ).rejects.toMatchObject({ cause: { name: 'UnauthorizedError' } });
     },
   ),
 
   networkJwtNonPublic: accessTierGatingCell(
-    'admits network-JWT caller on non-public instance',
+    'admits network member and returns proposals',
     async ({ task, onTestFinished, callers }) => {
       const testData = new TestDecisionsDataManager(task.id, onTestFinished);
 
