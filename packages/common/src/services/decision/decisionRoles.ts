@@ -33,6 +33,39 @@ export type CustomRoleDefinition = {
   permissions: Record<string, ZonePermission>;
 };
 
+export const ANONYMOUS_PARTICIPANT_ROLE_NAME = 'Anonymous Participant';
+
+export const anonymousParticipantRoleDefinition = {
+  name: ANONYMOUS_PARTICIPANT_ROLE_NAME,
+  description: 'Public anonymous visitor role for proposal submission.',
+  permissions: {
+    profile: {
+      type: 'acrud',
+      value: {
+        admin: false,
+        create: false,
+        read: true,
+        update: false,
+        delete: false,
+      },
+    },
+    decisions: {
+      type: 'decision',
+      value: {
+        create: false,
+        read: true,
+        update: false,
+        delete: false,
+        admin: false,
+        inviteMembers: false,
+        review: false,
+        submitProposals: true,
+        vote: false,
+      },
+    },
+  },
+} satisfies CustomRoleDefinition;
+
 function toBitfield(zonePermission: ZonePermission): number {
   if (zonePermission.type === 'decision') {
     return toDecisionBitField(zonePermission.value) | permission.READ;

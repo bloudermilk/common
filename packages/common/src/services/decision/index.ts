@@ -14,6 +14,7 @@ export * from './listLegacyInstances';
 export * from './getInstance';
 export * from './listDecisionProfiles';
 export * from './getDecisionBySlug';
+export * from './joinInstance';
 
 // Shared phase advancement core (used by transitionFromPhase and transitionMonitor)
 export * from './advancePhase';

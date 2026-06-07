@@ -6,6 +6,7 @@ import { getCategoriesRouter } from './getCategories';
 import { getDecisionBySlugRouter } from './getDecisionBySlug';
 import { getInstanceRouter, getLegacyInstanceRouter } from './getInstance';
 import { getPhaseReviewProgressRouter } from './getPhaseReviewProgress';
+import { joinPublicInstanceRouter } from './joinPublicInstance';
 import { listDecisionProfilesRouter } from './listDecisionProfiles';
 import { listLegacyInstancesRouter } from './listLegacyInstances';
 import { listProposalSubmittersRouter } from './listProposalSubmitters';
@@ -22,6 +23,7 @@ export const instancesRouter = mergeRouters(
   transitionFromPhaseRouter,
   listLegacyInstancesRouter,
   getInstanceRouter,
+  joinPublicInstanceRouter,
   getLegacyInstanceRouter,
   getPhaseReviewProgressRouter,
   getCategoriesRouter,
